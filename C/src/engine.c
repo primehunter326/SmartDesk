@@ -18,8 +18,7 @@ made and such.
 
 */
 
-//System Includes
-#include "conf.h"			
+//System Includes			
 #include <sys/mman.h>		//Allows use of mmap
 #include <fcntl.h>    		//For file constants (read write,create,permissions...)
 #include <assert.h> 
@@ -28,6 +27,7 @@ made and such.
 
 //Nonsystem Includes
 #include "network.h"
+#include "conf.h"
 
 /*Creates the memory to be shared between the network and graphics processes
 *returns -1 on failure, file descriptor for shared file on success
