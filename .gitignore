@@ -5,6 +5,7 @@ C/obj/*.o
 C/bin
 *.o
 *.h.gch
+*.mshare
 
 #Java ignores
 Java/*.class
