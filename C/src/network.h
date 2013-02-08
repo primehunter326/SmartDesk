@@ -8,6 +8,8 @@
 typedef struct {
 	void * memShareAddr;
 	int memShareFD;
+	int memSeekInt;
+	int serverSockFD;
 	//Probably gonna end up putting an fd_set in here... the master set anyway, not the working set
 } NetworkModule;
 
@@ -27,6 +29,13 @@ Returns -1 on failure, 0 on success
 */
 int setupNetworkModule(int fd, NetworkModule * module);
 
+
+
+/*Creates a socket for the server to run on
+*	module NetworkModule structure to be filled out with the server information
+*	returns -1 on failure, 0 on success
+*/
+int createServerSocket(NetworkModule * module);
 
 /*
 createSocket takes the port and string form of an ip address and returns
@@ -48,5 +57,12 @@ int createSocket(uint16_t port, const char * ip_address,struct sockaddr_in * add
 */
 int isDataReady(fd_set * sockSet, const int maxFileDescriptor );
 
+/*Core logic loop of the Network Module
+*	module: The NetworkModule structure to use to accept
+*			incoming connections and write to mmaped file
+*/
+void runServer(NetworkModule * module);
+
+void handleIncoming(int fd, NetworkModule * module);
 
 #endif
