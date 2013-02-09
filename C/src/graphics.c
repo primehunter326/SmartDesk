@@ -29,10 +29,9 @@
 
 //Global variables
 int mouseDown = 0;			           //True/False for if the mouse is 
-int brushSize = 5;                     //Size of the brush
+int brushSize = 6;                     //Size of the brush
 int static buffered[CLICKBUFFERSIZE];  //Buffer to hold x,y coordinates to draw
 int static bufferPointer = 0;          //When to stop reading from the buffered
-
 
 
 //Returns -1 on failure, 0 on success, sets up the module
@@ -74,30 +73,25 @@ int setupGraphicModule(int fd, GraphicModule * module){
 	return 0;
 }
 
-void smoothPath(){
-    int i,x,y,nx,ny,j;
-    int xStep,yStep;
-    int distance = 0;
-    int tempPointer = bufferPointer;
-    for(i=0; i < tempPointer -4; i=i+2){
-        puts("i got in");
-        x=buffered[i];
-        y=buffered[i+1];
-        nx=buffered[i+2];
-        ny=buffered[i+3];
-        //Figure out the distance between this one and the next point
-        distance = sqrt((x-nx )*(x-nx)+(y-ny)*(y-ny));
-        //To figure out the 'steps', divide  distance by the coordinate length
-        xStep = (x-nx)/distance;
-        yStep = (y-ny)/distance;
-        printf("%d,%d\n", xStep,yStep);
-        //Now add in steps of that distance to the buffer
-        for(; j < SMOOTHINGSTEPS; j++){
-            buffered[bufferPointer] = x+xStep;
-            buffered[bufferPointer+1] = y+yStep;
-            bufferPointer = bufferPointer+2;
-        }
+void smoothPath(Uint16 x, Uint16 y, Sint16 xrel, Sint16 yrel){
+    //The relative x,y tell us how far away from the previous x,y we were.
+    printf("%d %d, %d %d\n", x,y,xrel,yrel);
+    //x-xrel gives us the previous coordinate
+    //We can use this to define a path between the points and fill in holes
+    float dist = sqrt((x-(x-xrel))*(x-(x-xrel)) + (y-(y-yrel))*(y-(y-yrel)));
+
+    //Consider making these static or pre-declared for time saving
+    float xSteps = xrel/dist;
+    float ySteps = yrel/dist;
+
+    int i = 1;
+    for(; i < dist/SMOOTHINGSTEPS; i++){
+        buffered[bufferPointer] = (int)(x - xSteps*i);
+        buffered[bufferPointer+1] = (int)(y - ySteps*i);
+        bufferPointer= bufferPointer+2;
     }
+    
+
 }
 
 void setpixel(SDL_Surface *screen, int x, int y, Uint8 r, Uint8 g, Uint8 b)
@@ -123,7 +117,6 @@ void drawBuffered(SDL_Surface *screen){
 
     int i = 0;
     int x,y=0;
-    //printf("%d,",bufferPointer );
     for(; i < bufferPointer && i < CLICKBUFFERSIZE; i=i+2){
     	//Each odd number is an x, each even is a y
         for(x=0; x < brushSize; x++ ){
@@ -181,9 +174,6 @@ void runGraphics(GraphicModule * module){
 		}
         //Since smoothing is a preprocessor, if it's set to !1 then this call
         //should be optimized out by the compiler
-        if(SMOOTHING==1){
-            smoothPath();
-        }
         drawBuffered(module->screen);
     }
 
@@ -200,7 +190,7 @@ void handleGraphicEvent(SDL_Event  event, GraphicModule * module, int * stopFlag
 	       	*stopFlag = 1;
 	       	break;
 	    case SDL_KEYDOWN:
-	    	handleKeyEvent(event,stopFlag);
+	    	handleKeyEvent(event,stopFlag,module);
 	    	break;
 	    case SDL_MOUSEBUTTONDOWN:
 	    	mouseDown = 1;
@@ -212,14 +202,21 @@ void handleGraphicEvent(SDL_Event  event, GraphicModule * module, int * stopFlag
 	    case SDL_MOUSEMOTION:
 	    	handleMouseEvent(event);
 	    	break;
+        default:
+            break;
 	}
 }
 
-void handleKeyEvent(SDL_Event  event, int *stopFlag){
+void handleKeyEvent(SDL_Event  event, int *stopFlag, GraphicModule * module){
 	switch( event.key.keysym.sym ){
 		case SDLK_ESCAPE:
 	    	*stopFlag = 1;
 	    	break;
+        case SDLK_F1:
+            clearScreen(module->screen);
+            break;
+        default:
+            break;
 	}
 }
 
@@ -227,6 +224,10 @@ void handleMouseEvent(SDL_Event event){
     if(mouseDown){
         buffered[bufferPointer] = event.motion.x;
         buffered[bufferPointer+1] = event.motion.y;
+        //If smoothing is off this will be optimized out by the compiler
+        if(SMOOTHING==1){
+            smoothPath(event.motion.x,event.motion.y,event.motion.xrel,event.motion.yrel);
+        }
         bufferPointer = bufferPointer+2;
         if(bufferPointer > CLICKBUFFERSIZE){
             puts("aw shit ");//what a good error message for now
