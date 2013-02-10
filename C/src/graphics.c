@@ -26,10 +26,11 @@
 //Local includes
 #include "conf.h"
 #include "graphics.h"
+#include "menu.h"
 
 //Global variables
 int mouseDown = 0;			           //True/False for if the mouse is 
-int brushSize = 6;                     //Size of the brush
+int brushSize = 3;                     //Size of the brush
 int static buffered[CLICKBUFFERSIZE];  //Buffer to hold x,y coordinates to draw
 int static bufferPointer = 0;          //When to stop reading from the buffered
 
@@ -70,12 +71,23 @@ int setupGraphicModule(int fd, GraphicModule * module){
 		return -1;
 	}
    
+
+    if(loadUI(module) < 0){
+        puts("Failed to load User Interface");
+        SDL_Quit();
+        return -1;
+    }
+
+    //Set the stop flag
+    module->stopFlag = 0;
+
+    SDL_WM_SetCaption( "Smart Desk | Interactive Learning Software", NULL);
+
 	return 0;
 }
 
 void smoothPath(Uint16 x, Uint16 y, Sint16 xrel, Sint16 yrel){
     //The relative x,y tell us how far away from the previous x,y we were.
-    printf("%d %d, %d %d\n", x,y,xrel,yrel);
     //x-xrel gives us the previous coordinate
     //We can use this to define a path between the points and fill in holes
     float dist = sqrt((x-(x-xrel))*(x-(x-xrel)) + (y-(y-yrel))*(y-(y-yrel)));
@@ -85,10 +97,12 @@ void smoothPath(Uint16 x, Uint16 y, Sint16 xrel, Sint16 yrel){
     float ySteps = yrel/dist;
 
     int i = 1;
-    for(; i < dist/SMOOTHINGSTEPS; i++){
+    //We need to guard against seg faults via the buffer size
+    for(; i < dist && bufferPointer < CLICKBUFFERSIZE -2; i++){
         buffered[bufferPointer] = (int)(x - xSteps*i);
         buffered[bufferPointer+1] = (int)(y - ySteps*i);
         bufferPointer= bufferPointer+2;
+
     }
     
 
@@ -117,11 +131,16 @@ void drawBuffered(SDL_Surface *screen){
 
     int i = 0;
     int x,y=0;
+    int drawnY,drawnX;
+    int ylimit = SCREENHEIGHT*screen->pitch/BITSPERPIXEL; //ylimit is307200
     for(; i < bufferPointer && i < CLICKBUFFERSIZE; i=i+2){
     	//Each odd number is an x, each even is a y
         for(x=0; x < brushSize; x++ ){
             for(y=0; y < brushSize; y++){
-                setpixel(screen, buffered[i]+x,(buffered[i+1]+y)*screen->pitch/BITSPERPIXEL,0,0,0);        
+                drawnY=(buffered[i+1]+y)*screen->pitch/BITSPERPIXEL;
+                drawnX=buffered[i]+x;
+                if(drawnY < ylimit && drawnX < SCREENWIDTH)
+                    setpixel(screen, drawnX,drawnY,0,0,0);        
             }
         }
     }
@@ -133,6 +152,22 @@ void drawBuffered(SDL_Surface *screen){
     SDL_Flip(screen); 
 }
 
+void drawUI(GraphicModule * module){
+    if(SDL_MUSTLOCK(module->screen)) 
+    {
+        if(SDL_LockSurface(module->screen) < 0){
+            return;
+        }
+    }
+
+    //Ask the menu to draw itself please
+    drawMenu(module->screen,module->menu);
+
+    if(SDL_MUSTLOCK(module->screen)) SDL_UnlockSurface(module->screen);
+  
+    SDL_Flip(module->screen); 
+}
+
 void clearScreen(SDL_Surface* screen){ 
     if(SDL_MUSTLOCK(screen)) 
     {
@@ -142,18 +177,10 @@ void clearScreen(SDL_Surface* screen){
     }
 
     int x, y, ytimesw;
-  
-
-    for(y = 0; y < screen->h; y++ ) 
-    {
-    	//pitch is the scanline
-        ytimesw = y*screen->pitch/BITSPERPIXEL;
-        for( x = 0; x < screen->w; x++ ) 
-        {
-            setpixel(screen, x, ytimesw, 255, 255, 255);
-        }
-    }
-
+    
+    SDL_FillRect( screen, &screen->clip_rect, SDL_MapRGB( screen->format, 0xFF, 0xFF, 0xFF ) );
+    bufferPointer = 0;
+    
     if(SDL_MUSTLOCK(screen)) SDL_UnlockSurface(screen);
   
     SDL_Flip(screen); 
@@ -165,52 +192,76 @@ void runGraphics(GraphicModule * module){
     int keyQuit = 0;
     
     clearScreen(module->screen);
+    
     //Main graphics event loop goes until an event causes keyquit != 0
-    while(keyQuit == 0){
-        
+    while(module->stopFlag == 0){
         //Loop until there are no more events to process
         while(SDL_PollEvent(&event)) {    
-        	handleGraphicEvent(event, module,&keyQuit);  
+        	handleGraphicEvent(event, module);  
 		}
         //Since smoothing is a preprocessor, if it's set to !1 then this call
         //should be optimized out by the compiler
         drawBuffered(module->screen);
+        drawUI(module);   
     }
+
+    SDL_FreeSurface(module->screen);
 
     SDL_Quit();
   
 
 }
 
-void handleGraphicEvent(SDL_Event  event, GraphicModule * module, int * stopFlag){
+//-1 for fail 0 for good
+int loadUI(GraphicModule * module){
+    module->menu = malloc(sizeof(Menu));
+
+    //Load the bitmap font and make the proper sprites and such
+
+    if(module->menu == NULL){
+        puts("failed allocating memory for menu");
+        return -1;
+    }
+
+    if(setupMenu(module->menu)){
+        puts("failed setting up menu");
+        return -1;
+    }
+
+    return 0;
+
+}
+
+void handleGraphicEvent(SDL_Event  event, GraphicModule * module){
 	//Giant Case to handle all events
 	switch (event.type){
         case SDL_QUIT:
 	       	//Halt the execution of the graphics
-	       	*stopFlag = 1;
+	       	module->stopFlag = 1;
 	       	break;
 	    case SDL_KEYDOWN:
-	    	handleKeyEvent(event,stopFlag,module);
+	    	handleKeyEvent(event,module);
 	    	break;
 	    case SDL_MOUSEBUTTONDOWN:
 	    	mouseDown = 1;
-            handleMouseEvent(event);
+            handleMouseEvent(event,module);
 	    	break;
 	    case SDL_MOUSEBUTTONUP:
 	    	mouseDown = 0;
+            handleMouseEvent(event,module);
 	    	break;
 	    case SDL_MOUSEMOTION:
-	    	handleMouseEvent(event);
+	    	handleMouseEvent(event,module);
 	    	break;
         default:
             break;
 	}
 }
 
-void handleKeyEvent(SDL_Event  event, int *stopFlag, GraphicModule * module){
+void handleKeyEvent(SDL_Event  event, GraphicModule * module){
 	switch( event.key.keysym.sym ){
 		case SDLK_ESCAPE:
-	    	*stopFlag = 1;
+	    	module->stopFlag = 1;
 	    	break;
         case SDLK_F1:
             clearScreen(module->screen);
@@ -220,17 +271,49 @@ void handleKeyEvent(SDL_Event  event, int *stopFlag, GraphicModule * module){
 	}
 }
 
-void handleMouseEvent(SDL_Event event){
-    if(mouseDown){
-        buffered[bufferPointer] = event.motion.x;
-        buffered[bufferPointer+1] = event.motion.y;
-        //If smoothing is off this will be optimized out by the compiler
-        if(SMOOTHING==1){
-            smoothPath(event.motion.x,event.motion.y,event.motion.xrel,event.motion.yrel);
+void handleMouseEvent(SDL_Event event, GraphicModule * module){
+    //Welcome to the bottleneck, we got fun and games
+    //If lagging is your issue, here you must change!
+    if(withinMenu(event.motion.x) != -1){
+        int button = checkButtons(module->menu, event.motion.x,event.motion.y);
+        if(button != -1){
+            if(mouseDown){
+                //Click
+                module->menu->buttons[button]->clicked = 1;
+                module->menu->buttons[button]->hover = 0;
+            }else{
+                //Hover or finished clicking
+                if(module->menu->buttons[button]->clicked == 1){
+                    //We just finished clicking and are about to change back to a hover state
+
+                }
+                module->menu->buttons[button]->clicked = 0;
+                module->menu->buttons[button]->hover = 1;
+            }
+        }else{
+            //Not in any buttons, make sure all of them are in their default state
+            int i;
+            for(i=0; i < NUMBER_OF_BUTTONS; i++){
+                module->menu->buttons[i]->clicked = 0;
+                module->menu->buttons[i]->hover = 0;
+            }
         }
-        bufferPointer = bufferPointer+2;
-        if(bufferPointer > CLICKBUFFERSIZE){
-            puts("aw shit ");//what a good error message for now
+    }else{
+        //Drawing
+        if(mouseDown){
+            if(event.motion.x < SCREENWIDTH && event.motion.y < SCREENHEIGHT){
+                buffered[bufferPointer] = event.motion.x;
+                buffered[bufferPointer+1] = event.motion.y;
+                //If smoothing is off this will be optimized out by the compiler
+                if(SMOOTHING==1){
+                    smoothPath(event.motion.x,event.motion.y,event.motion.xrel,event.motion.yrel);
+                }
+                bufferPointer = bufferPointer+2;
+            }    
+            if(bufferPointer > CLICKBUFFERSIZE){
+                puts("aw shit ");//what a good error message for now
+                bufferPointer = 0;
+            }
         }
     }
 }
