@@ -49,14 +49,6 @@ int setupGraphicModule(int fd, GraphicModule * module){
 	//Zero the buffered array
 	memset(buffered,0,sizeof(buffered));
 
-	//Setup the void pointer for the mapped file
-	module->memShareAddr = (void*)malloc(sizeof(void*));
-	module->memShareFD = -1;
-	if(module->memShareAddr == NULL){
-		puts("Failed allocating memory for Graphics Module");
-		return -1;
-	}
-
 	module->memShareAddr = mmap(NULL, MEMSHARESIZE, PROT_READ, MAP_SHARED, fd, 0);
 	if(module->memShareAddr == MAP_FAILED){
 		perror("memsharegraphic");
