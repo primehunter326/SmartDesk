@@ -3,7 +3,7 @@
 CC=gcc
 
 
-bin/engine: bin/engine.o bin/network.o bin/graphics.o 
+bin/engine: bin/engine.o bin/network.o bin/graphics.o bin/menu.o bin/button.o bin/bitfont.o
 	$(CC) -o bin/engine bin/network.o bin/engine.o bin/graphics.o bin/menu.o bin/button.o bin/bitfont.o `sdl-config --libs` -lpthread -lm
 
 bin/engine.o: src/engine.c src/engine.h src/conf.h

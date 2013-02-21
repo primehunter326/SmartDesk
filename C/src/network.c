@@ -22,7 +22,7 @@ by including network.h
 //Let's get our assert on
 #include <assert.h>
 //Rather random, but file descriptor sets are stored in time. who knows why... Aliens.
- #include <sys/time.h> 
+#include <sys/time.h> 
 //For EAGAIN
 #include <errno.h>
 //Need mmap for interprocess comm
@@ -54,110 +54,91 @@ void destroyNetworkModule(NetworkModule * module){
 	module->memSeekInt =0;
 }
 
-//Instantiates the networkModule returns -1 on failure, 0 on success
-int createNetworkModule(NetworkModule * module){
-	//(void*)malloc(sizeof(void*));
-	//memShareAddr was originally allocated with the above
-	//but it's really not nessecary, and might cause a small memleak
-	module->memShareAddr = NULL;
-	module->memShareFD   = -1;
-	module->serverSockFD = -1;
-	module->memSeekInt = 0;
 
-	return 0;
-}
-
-//Creates a socket for the server to run on, returns -1 on failure, 0 on success
-int createServerSocket(NetworkModule * module){
-	struct sockaddr_in serv_addr;
-	//Internet based socket, tcp and default protocol
-	module->serverSockFD = socket(AF_INET, SOCK_STREAM, 0);
-	if(module->serverSockFD < 0){
-		return -1;
-	}
-
-	//Zero memory for struct
-	memset((char *) &serv_addr, 0, sizeof(serv_addr));
-
-    //Setup internet portwith default addressing
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    //Convert port to network byte order
-    serv_addr.sin_port = htons(SERVERPORT);
-
-    if (bind(module->serverSockFD , (struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0){
-    	//Really want to make a logging function here
-    	return -1;
-    }
-    return 0;
-}
-
-/*Set's up the memory share for the module and initializes network connections. Also calls
-  createNetworkModule, so you only need to pass an uninitialized struct of NetworkModule to
-  the function, it will handle instantiating it for you.
+/*Creates a NetworkModule and binds a socket to 
 	fd: File descriptor for file to write to
 	module: NetworkModule struct to fill out with information
 Really good example of nonblocking io.
 http://publib.boulder.ibm.com/infocenter/iseries/v5r3/index.jsp?topic=%2Frzab6%2Frzab6xnonblock.htm 
-
 Returns -1 on failure, 0 on success
 */
-int setupNetworkModule(int fd, NetworkModule * module){
-	int result = createNetworkModule(module);
-	if(result == -1){
-		puts("Problem allocating memory for network module");
-		return -1;
-	}
-
+//TODO: this could take a parameter specifying whether this is a server or a client
+int createNetworkModule(int fd, NetworkModule * module){
+	module->memSeekInt = 0;
 	//Set up the memory share:
 	// Write only for the network, it doesn't need to read it at all
 	module->memShareAddr = mmap(NULL, MEMSHARESIZE, PROT_WRITE, MAP_SHARED, fd, 0);
 	if(module->memShareAddr == MAP_FAILED){
 		puts("Failed to map memory share to network module");
-		munmap(module->memShareAddr,MEMSHARESIZE);
+		perror("heressomehelp");
+        munmap(module->memShareAddr,MEMSHARESIZE);
 		return -1;
 	}
 	module->memShareFD = fd;
-
-	//Create the server 
-	if(createServerSocket(module) < 0){
-		puts("Failed to create the socket for the server");
+    module->serverSockFD = socket(AF_INET, SOCK_STREAM, 0);
+    if(module->serverSockFD < 0)
 		return -1;
-	}
-
-	return 0;
+    return 0;
 }
 
-void runServer(NetworkModule * module){
-	//Set up client structures for incoming messages
-	struct sockaddr_in cli_addr;
-	socklen_t clientLen;
-
-	//list for incoming messages. (up to 5)
-	//Note that 5 is chosen because its the max for most systems
-	listen(module->serverSockFD,5);
-	clientLen = sizeof(cli_addr);
-	//This is where we would accept an incoming message
-	printf("%s on %d \n", "Server Running", module->serverSockFD);
-	//This part should loop, but for testing purposes just once
-	//Accept an incoming connection
-	int incomingFD=-1;
-	
-	//Wait... while(1){
-	incomingFD = accept(module->serverSockFD,
-							(struct sockaddr *) &cli_addr,
-							&clientLen);
-	printf("%d\n", incomingFD);
-	if(incomingFD < 0){
-		perror("incomingFD");
-	}
-	handleIncoming(incomingFD, module);
-	close(incomingFD);
-	
-	
-	destroyNetworkModule(module);
+//starts the network module as a client to connect to a server
+/*
+int startClient(NetworkModule * module){
+    char *host = "localhost";
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+    server = gethostbyname(host);   
+    bzero((char *) &serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr, 
+         (char *)&serv_addr.sin_addr.s_addr,
+         server->h_length);
+    serv_addr.sin_port = htons(SERVERPORT); //SERVERPORT hardcoded in conf.h
+    if (connect(module->serverSockFD,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
+        puts("Error connecting to server");
+    //here's where stuff happens
+    return 0;
 }
+*/
 
+//starts the network module as a server that listens for and responds to connections
+int startServer(NetworkModule * module){
+    struct sockaddr_in serv_addr, cli_addr;
+    socklen_t clilen = sizeof(cli_addr);
+    socklen_t servlen = sizeof(serv_addr);
+    int clientSockFD, childPID, result;
+
+    //Set up serv_addr
+    bzero((char *) &serv_addr, sizeof(serv_addr)); 
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    serv_addr.sin_port = htons(SERVERPORT); //SERVERPORT hardcoded in conf.h
+    
+    result = bind(module->serverSockFD,(struct sockaddr *) &serv_addr,servlen);
+    if (result < 0){
+    	puts("Error binding socket");
+        return -1;
+    }
+    listen(module->serverSockFD,5);
+    puts("Listening for connections...");
+ 
+    //fork the process every time a connection is established
+    //so multiple clients can connect at once
+    while(1){
+        clientSockFD = accept(module->serverSockFD,
+                            (struct sockaddr *) &cli_addr, &clilen);
+        childPID = fork();
+        if (childPID < 0)
+            puts("Something broke when forking");
+        if (childPID == 0){
+            close(module->serverSockFD);
+            handleIncoming(clientSockFD, module);
+            return 0;
+        }
+        else
+            close(clientSockFD);
+    }
+}
 
 void handleIncoming(int fd, NetworkModule * module){
 	char buffer[256];
@@ -192,3 +173,16 @@ void handleIncoming(int fd, NetworkModule * module){
 
 	msync(module->memShareAddr,sizeof(int),MS_SYNC|MS_INVALIDATE);
 }
+
+
+
+//test everything out
+//int main(){ 
+//    
+//   int fd = createMemShare();
+//    NetworkModule module;
+//    createNetworkModule(fd,&module);
+//    startServer(&module);
+//    destroyNetworkModule(&module);
+//    return 0;
+//}

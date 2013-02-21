@@ -67,7 +67,7 @@ void * createAndRunNetwork(void *memFD){
 	int fd = *((int *) memFD);
 	NetworkModule nm;
 
-	if(setupNetworkModule(fd,&nm) < 0){
+	if(createNetworkModule(fd,&nm) < 0){
 		puts("Failed setting up NetworkModule");
 		return NULL;
 	}
