@@ -9,7 +9,7 @@ Libraries needed to compile so far:
  libsdl-image1.2 & libsdl-image1.2-dev
 
 Compiling:
-  gcc engine.c -lpthread
+  see the makefiles and compile.sh scripts in ./C/
 
 Data Structure for sending information:
  Larger objects are serialized
